@@ -1,6 +1,5 @@
 """Test fixtures for pytest-django."""
 
-
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
