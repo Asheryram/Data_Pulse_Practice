@@ -21,7 +21,7 @@ jobs:
               "IshimweDiane":   "lubandi",            // Diane to Joseph
               "JoeBright1619":  "Kalisha1234",        // Bright to Bernice
               "Kalisha1234":    "JoeBright1619",      // Bernice to Bright
-              "Zaina-M":        "Asheryram", // Zainab to Yram 
+              "Zaina-M":        "Asheryram", // Zainab to Yram
               "Asheryram": "lubandi",        // Yram to Joseph
             };
 
