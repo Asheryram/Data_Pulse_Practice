@@ -66,6 +66,25 @@ git commit -m "feat(auth): add login"
 
 ---
 
+## Manual Formatting (Optional)
+
+If you want to format code before committing:
+
+```bash
+# Windows
+format.bat backend
+
+# Linux/Mac/Git Bash
+./format.sh backend
+```
+
+This runs:
+1. isort (import sorting)
+2. black (code formatting)
+3. flake8 (linting)
+
+---
+
 ## Troubleshooting
 
 **"pre-commit: command not found" (Windows)**

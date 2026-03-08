@@ -1,4 +1,5 @@
 """OpenTelemetry tracing configuration."""
+
 import os
 
 from opentelemetry import trace
