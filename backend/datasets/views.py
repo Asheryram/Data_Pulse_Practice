@@ -14,6 +14,7 @@ from rest_framework import generics, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from scheduling.tasks import process_uploaded_file
 
 
 class DatasetUploadView(APIView):
@@ -70,6 +71,9 @@ class DatasetUploadView(APIView):
         )
 
         DatasetFile.objects.create(dataset=dataset, file_path=file_path, original_filename=filename)
+
+        # Trigger Celery task to process file in background
+        process_uploaded_file.delay(dataset.id, filename)
 
         return Response(DatasetResponseSerializer(dataset).data, status=status.HTTP_201_CREATED)
 

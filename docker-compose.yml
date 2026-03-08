@@ -59,6 +59,72 @@ services:
       retries: 5
 
   # -----------------------------------------------------------
+  # Redis (Message Broker for Celery)
+  # -----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: datapulse-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - datapulse-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Celery Worker (Background Tasks)
+  # -----------------------------------------------------------
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: datapulse-celery
+    command: celery -A datapulse worker -l info
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://datapulse:datapulse@db:5432/datapulse}
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-datapulse.settings.dev}
+    volumes:
+      - ./backend:/app
+      - upload_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - datapulse-network
+
+  # -----------------------------------------------------------
+  # Celery Beat (Scheduled Tasks)
+  # -----------------------------------------------------------
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: datapulse-celery-beat
+    command: celery -A datapulse beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://datapulse:datapulse@db:5432/datapulse}
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-datapulse.settings.dev}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - datapulse-network
+
+  # -----------------------------------------------------------
   # Django Backend
   # -----------------------------------------------------------
   backend:
@@ -74,6 +140,7 @@ services:
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
       GUNICORN_LOG_LEVEL: ${GUNICORN_LOG_LEVEL:-info}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
     ports:
       - "8000:8000"
     volumes:
@@ -150,6 +217,57 @@ services:
       - datapulse-network
 
   # -----------------------------------------------------------
+  # Loki (Log Aggregation)
+  # -----------------------------------------------------------
+  loki:
+    image: grafana/loki:latest
+    container_name: datapulse-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./devops/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - datapulse-network
+
+  # -----------------------------------------------------------
+  # Promtail (Log Collector)
+  # -----------------------------------------------------------
+  promtail:
+    image: grafana/promtail:latest
+    container_name: datapulse-promtail
+    volumes:
+      - ./devops/promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - datapulse-network
+
+  # -----------------------------------------------------------
+  # Tempo (Distributed Tracing)
+  # -----------------------------------------------------------
+  tempo:
+    image: grafana/tempo:latest
+    container_name: datapulse-tempo
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./devops/tempo/tempo-config.yml:/etc/tempo.yaml
+      - tempo_data:/loki
+    command: -config.file=/etc/tempo.yaml
+    restart: unless-stopped
+    networks:
+      - datapulse-network
+
+  # -----------------------------------------------------------
   # Grafana (Metrics Visualization)
   # -----------------------------------------------------------
   grafana:
@@ -179,6 +297,8 @@ volumes:
   upload_data:
   prometheus_data:
   grafana_data:
+  loki_data:
+  tempo_data:
 
 # =============================================================
 # Networks

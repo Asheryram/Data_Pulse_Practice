@@ -1,57 +1,55 @@
-"""Celery tasks for scheduled quality checks and notifications."""
-
-import logging
+"""Celery tasks for background processing."""
 
 from celery import shared_task
-from django.utils import timezone
-
-logger = logging.getLogger(__name__)
 
 
-@shared_task(name="scheduling.tasks.run_scheduled_checks")
-def run_scheduled_checks():
-    """Run quality checks on all datasets with active schedules.
-
-    This task is triggered by django-celery-beat at the configured interval.
-    It processes all active ScheduleConfig entries whose frequency has elapsed.
+@shared_task
+def process_uploaded_file(dataset_id, filename):
     """
-    from datetime import timedelta
+    Process uploaded CSV/JSON file in background.
+    Updates dataset status when complete.
+    """
+    import json
 
-    from scheduling.models import ScheduleConfig
-    from scheduling.notifications import check_and_notify
-    from scheduling.services import run_checks_for_dataset
+    from datasets.models import Dataset, DatasetFile
+    from datasets.services.file_parser import parse_csv, parse_json
 
-    FREQUENCY_DELTAS = {
-        "HOURLY": timedelta(hours=1),
-        "DAILY": timedelta(days=1),
-        "WEEKLY": timedelta(weeks=1),
-        "MONTHLY": timedelta(days=30),
-    }
+    print(f"\n{'=' * 60}")
+    print(f"[CELERY WORKER] 🚀 Starting to parse dataset {dataset_id}: {filename}")
+    print(f"{'=' * 60}\n")
 
-    active_schedules = ScheduleConfig.objects.filter(is_active=True).select_related("dataset")
-    now = timezone.now()
+    try:
+        dataset = Dataset.objects.get(id=dataset_id)
+        dataset_file = DatasetFile.objects.get(dataset=dataset)
 
-    for schedule in active_schedules:
-        delta = FREQUENCY_DELTAS.get(schedule.frequency, timedelta(days=1))
+        # Parse the file (this is the slow part for large files)
+        if filename.endswith(".csv"):
+            metadata = parse_csv(dataset_file.file_path)
+        else:
+            metadata = parse_json(dataset_file.file_path)
 
-        # Skip if last run was too recent
-        if schedule.last_run_at and (now - schedule.last_run_at) < delta:
-            continue
+        # Update dataset with parsed metadata
+        dataset.row_count = metadata["row_count"]
+        dataset.column_count = metadata["column_count"]
+        dataset.column_names = json.dumps(metadata["column_names"])
+        dataset.status = "COMPLETED"
+        dataset.save()
 
-        logger.info(f"Running scheduled check for dataset: {schedule.dataset.name}")
+        print(f"\n{'=' * 60}")
+        print("[CELERY WORKER] ✅ Finished parsing dataset {}".format(dataset_id))
+        print(f"[CELERY WORKER] 📈 Parsed {metadata['row_count']} rows, {metadata['column_count']} columns")
+        print("[CELERY WORKER] 💾 Updated dataset status to COMPLETED")
+        print(f"{'=' * 60}\n")
 
-        result = run_checks_for_dataset(
-            dataset=schedule.dataset,
-            user=None,
-            action="SCHEDULED_RUN",
-        )
-
-        # Update last run timestamp
-        schedule.last_run_at = now
-        schedule.save(update_fields=["last_run_at"])
-
-        # Send notifications if score is below threshold
-        if "score" in result:
-            check_and_notify(schedule.dataset, result["score"])
-
-        logger.info(f"Scheduled check complete for {schedule.dataset.name}: " f"score={result.get('score', 'N/A')}")
+        return {
+            "dataset_id": dataset_id,
+            "filename": filename,
+            "rows_parsed": metadata["row_count"],
+            "status": "completed",
+        }
+    except Exception as e:
+        print(f"[CELERY WORKER] ❌ Error processing dataset {dataset_id}: {e}")
+        dataset = Dataset.objects.get(id=dataset_id)
+        dataset.status = "FAILED"
+        dataset.save()
+        raise

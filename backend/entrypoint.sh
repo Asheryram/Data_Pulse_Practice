@@ -1,9 +1,8 @@
-#!/bin/sh
-set -e
+#!/bin/bash
 
 echo "==> Running migrations..."
-python manage.py makemigrations authentication datasets rules checks reports scheduling --noinput
-python manage.py migrate --noinput
+python manage.py makemigrations authentication datasets rules checks reports scheduling
+python manage.py migrate
 
 echo "==> Seeding default users..."
 python manage.py seed_users || true
